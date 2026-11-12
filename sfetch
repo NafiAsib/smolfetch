@@ -1,0 +1,93 @@
+#!/bin/sh
+# sfetch - a tiny, colorful system fetch for the Arduino UNO Q (works on any Linux)
+# Usage: sh sfetch      (or: chmod +x sfetch && ./sfetch)
+# Set NO_COLOR=1 to turn colors off.
+
+# ---------- colors ----------
+if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
+  e=$(printf '\033')
+  R="${e}[0m"  B="${e}[1m"
+  C="${e}[36m" Y="${e}[33m" M="${e}[35m" W="${e}[97m" G="${e}[90m"
+else
+  R='' B='' C='' Y='' M='' W='' G=''
+fi
+
+# ---------- logo (a little board with a Q on it) ----------
+q1='  ___  '; q2=' / _ \ '; q3='| | | |'; q4='| |_| |'; q5=' \__\_\'
+pins="${Y}o::::::::::::::::o${R}"
+e_="${C}|${R}"
+logo="${C} .--------------------.${R}
+ $e_ $pins $e_
+ $e_ ${W}.----.${R}    ${M}${B}$q1${R}  $e_
+ $e_ ${W}| ## |${R}    ${M}${B}$q2${R}  $e_
+ $e_ ${W}| ## |${R}    ${M}${B}$q3${R}  $e_
+ $e_ ${W}'----'${R}    ${M}${B}$q4${R}  $e_
+ $e_ ${G}[USB]${R}     ${M}${B}$q5${R}  $e_
+ $e_ $pins $e_
+${C} '--------------------'${R}"
+logo_w=23
+
+# ---------- gather info ----------
+rd() { [ -r "$1" ] && tr -d '\0' < "$1"; }
+
+[ -r /etc/os-release ] && . /etc/os-release
+os=${PRETTY_NAME:-$(uname -s)}
+board=$(rd /proc/device-tree/model)
+kernel="$(uname -r) ($(uname -m))"
+uptime=$(awk '{s=int($1); d=int(s/86400); h=int(s%86400/3600); m=int(s%3600/60);
+  if (d) printf "%dd ", d; if (h) printf "%dh ", h; printf "%dm", m}' /proc/uptime)
+cpu=$(lscpu 2>/dev/null | awk -F: '/Model name/ {sub(/^ +/, "", $2); print $2; exit}')
+[ -z "$cpu" ] && cpu=$(awk -F: '/model name|Hardware/ {sub(/^ +/, "", $2); print $2; exit}' /proc/cpuinfo)
+cores=$(nproc 2>/dev/null)
+[ -n "$cpu" ] && [ -n "$cores" ] && cpu="$cpu x$cores"
+mem=$(awk '/MemTotal/ {t=$2} /MemAvailable/ {a=$2}
+  END {printf "%d / %d MiB (%d%%)", (t-a)/1024, t/1024, (t-a)*100/t}' /proc/meminfo)
+disk=$(df -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
+temp=""
+for z in /sys/class/thermal/thermal_zone*/temp; do
+  t=$(cat "$z" 2>/dev/null) && [ -n "$t" ] && temp=$(awk -v t="$t" 'BEGIN {printf "%.1f°C", t/1000}') && break
+done
+ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+pkgs=$(dpkg-query -f '.\n' -W 2>/dev/null | wc -l)
+[ "$pkgs" = 0 ] && pkgs=""
+shell=${SHELL##*/}
+user=${USER:-$(id -un)}
+host=$(hostname 2>/dev/null || uname -n)
+
+# ---------- build info lines ----------
+title="$user@$host"
+info="${M}${B}${user}${R}@${M}${B}${host}${R}
+${G}$(printf '%s' "$title" | sed 's/./-/g')${R}
+"
+add() { [ -n "$2" ] && info="$info$(printf '%s%-7s%s %s' "$C$B" "$1" "$R" "$2")
+"; }
+add OS      "$os"
+add Board   "$board"
+add Kernel  "$kernel"
+add Uptime  "$uptime"
+add CPU     "$cpu"
+add Memory  "$mem"
+add Disk    "$disk"
+add Temp    "$temp"
+add IP      "$ip"
+add Pkgs    "$pkgs"
+add Shell   "$shell"
+bar=""
+for n in 0 1 2 3 4 5 6 7; do bar="$bar${e}[4${n}m   "; done
+[ -n "$C" ] && info="$info
+$bar$R"
+
+# ---------- print side by side ----------
+nl=$(printf '%s\n' "$logo" | wc -l)
+ni=$(printf '%s' "$info" | wc -l); ni=$((ni + 1))
+max=$(( nl > ni ? nl : ni ))
+pad=$(printf "%${logo_w}s" "")
+echo
+i=1
+while [ "$i" -le "$max" ]; do
+  l=$(printf '%s\n' "$logo" | sed -n "${i}p")
+  r=$(printf '%s\n' "$info" | sed -n "${i}p")
+  printf '%s   %s\n' "${l:-$pad}" "$r"
+  i=$((i + 1))
+done
+echo
